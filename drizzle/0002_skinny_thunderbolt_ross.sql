@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "one_active_run_per_account" ON "rebalance_runs" USING btree ("account_id") WHERE "rebalance_runs"."status" in ('executing_sells', 'executing_buys');

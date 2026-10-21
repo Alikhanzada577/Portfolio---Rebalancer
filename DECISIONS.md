@@ -1,0 +1,138 @@
+# Decisions
+
+Short notes on non-obvious choices, for the deep dive.
+
+## Architecture & product
+
+- **Next.js API routes instead of a separate backend.** One deploy, and the OAuth client secret never leaves the server.
+- **Per-account rebalancing.** Cash can't move between brokerages via the API, so each account must fund its own buys. The combined view is informational.
+- **Rebalance everything once any holding breaches the band.** Fixing only the breaching symbol leaves the portfolio half-fixed and just triggers again soon.
+- **Untargeted holdings are left alone.** They're excluded from the rebalance base and shown as "not managed", so the app never sells something the user didn't opt in.
+- **Sells before buys; buys recomputed from actual cash after sells.** Handles partial fills and price movement instead of trusting preview estimates.
+- **Preview expires after 5 minutes.** Prices move; an old preview is no longer what the user agreed to.
+- **Static ETF look-through data for the demo.** Production would use an ETF holdings data provider.
+- **Locked, transactional token refresh.** Refresh tokens rotate, so two concurrent refreshes would invalidate each other. `SELECT … FOR UPDATE` serializes them.
+- **Single-currency accounts only in v1.** Mixed-currency accounts get a warning and are excluded from rebalancing.
+- **Polling-based execution.** Vercel functions have time limits; the status endpoint advances the run step by step instead of one long request.
+
+## Phase 1: setup
+
+- **`postgres` (postgres.js) driver, not `@neondatabase/serverless` HTTP.** The token refresh needs an interactive transaction with `SELECT … FOR UPDATE`, which the Neon HTTP driver can't do. postgres.js over TCP works with Neon and with a local Postgres. `prepare: false` keeps it compatible with Neon's pooled (PgBouncer) endpoint.
+- **Vitest 4.1.12, not 5.x.** Vitest 5 requires Node ≥ 22.12; the dev machine runs Node 20. Nothing we use differs between the two.
+- **Env validation runs in `instrumentation.ts`.** `register()` runs once at server boot, so a missing variable stops the server immediately instead of failing on the first request. Errors list key names only, never values.
+- **`import "server-only"` in env, crypto and db modules.** If any of them is ever imported from a client component, the build fails, which guards against leaking the secret into a client bundle.
+- **Encrypted value format `iv:ciphertext:tag` (base64 parts, 12-byte random IV).** GCM's auth tag makes tampering or a wrong key throw instead of returning garbage.
+- **Run status and order side are Postgres enums; order status is free text.** Run status is our own state machine. Order status mirrors SnapTrade's vocabulary, which gets confirmed against the API reference in Phase 5.
+- **Numeric columns read as JS `number` (Drizzle `mode: "number"`).** Values are percentages and dollar amounts well within double precision, and the engine works in numbers anyway.
+
+## Phase 2: auth
+
+- **Login state lives in the same encrypted session cookie.** `state`, `nonce` and `code_verifier` sit in the iron-session cookie (httpOnly, `sameSite=lax` so it survives the redirect back from SnapTrade). The callback clears them before doing anything else, so a replayed callback always fails.
+- **Callback checks `iss` when present (RFC 9207).** SnapTrade advertises `authorization_response_iss_parameter_supported`; checking it closes the mix-up attack for one line of code.
+- **`iat` check via `maxTokenAge: 10m`.** The id_token is verified seconds after it's issued, so anything older is suspicious. 30s of clock tolerance.
+- **Forced refresh passes the rejected token.** After a 401, `getAccessToken(userId, { rejected })` takes the row lock and re-reads. If another request already swapped in a new token, it reuses that instead of burning another refresh. Only one real refresh happens per expiry, however many requests race.
+- **Token endpoint call happens while holding the row lock.** Simplest way to make the rotation atomic. The cost is one HTTP round-trip under lock, at most once per 10 hours per user.
+- **Only `invalid_grant` on refresh deletes tokens.** Network errors and 5xx responses leave the tokens in place, so a SnapTrade blip doesn't sign everyone out.
+- **Sign out = disconnect.** Both revoke the refresh token at SnapTrade and delete local tokens. Revocation is best effort: local tokens are deleted even if SnapTrade is unreachable.
+- **Cache Components kept on (Next 16 default).** Session-reading UI sits behind `<Suspense>`, which doubles as the loading state the plan requires. A signed-out visit to a protected page redirects from inside the streamed response.
+- **`/accounts` used for the auth smoke test.** It's what the OAuth guide documents. The OpenAPI spec also lists `/accounts/all` (results across connections); Phase 3 picks the list endpoint from real responses.
+
+## Phase 3: portfolio data
+
+- **ETF look-through weights are approximate, user-supplied demo data.** `data/etf-holdings.ts` covers SPY, VOO, IVV, QQQ and VTI with top-10/11 constituents only, and `asOf` is still `TODO(verify)`. The UI must label this as approximate; production would use an ETF holdings data provider.
+- **Holdings come from `positions/all`; crypto is in the same endpoint.** `instrument.kind` (`stock`/`adr` → equity, `etf`, `crypto`, everything else → other) drives the asset type. Derivatives without a symbol are skipped with a warning.
+- **Every dashboard number is built from positions + cash, and SnapTrade's own total is only a cross-check.** On the real Binance SPOT account the accounts list says $762.87, account details say $751.00, and the itemised positions add up to $238.05. The brokerage doesn't explain the gap, so we don't guess: we show what's itemised and warn when the totals differ by more than 5%.
+- **`supportsTrading` needs both the connection's `type === "trade"` and the brokerage's `allows_trading`.** Binance allows trading as a brokerage, but this user's connection was granted read only, so the account is manual-mode. Anything unknown (no connection found, disabled, maintenance) is false.
+- **Non-USD or mixed-currency accounts are excluded from totals, allocation and exposure**, with a warning on the account card.
+- **Look-through exposure divides by portfolio value including cash.** An ETF with weights is replaced by its constituents; the part of the fund outside the weights we have is reported as "unattributed" so shares still add to 100%.
+- **ETF weights: Alpha Vantage `ETF_PROFILE`, cached 24h in Postgres, static table as fallback.** The free tier is 25 requests/day and rejects bursts (found in testing: parallel requests came back 200 with no holdings), so calls are sequential with a 1.2s gap. A failed symbol is retried after 1h, so a bad ticker can't burn the quota. Duplicate listings are summed, `n/a` placeholders dropped, `BRK-B` becomes `BRK.B`.
+- **Allocation chart is sorted horizontal bars (top 8 + Other), not a donut, and not Recharts.** A donut with 30+ slices is unreadable; bars carry identity in the label so one hue suffices, and plain HTML/CSS gives dark mode and accessibility for free. `recharts` was removed as unused. The holdings table is the table view, with positions under $1 folded into a `<details>`.
+- **One account failing to load doesn't blank the dashboard.** It's listed as "couldn't read X" and the rest renders. `ReauthRequired` still takes over the whole page.
+
+## Phase 4: targets and engine
+
+- **Engine is pure functions over an `AccountSnapshot`.** `computeDrift` and `generatePlan` take data in and return a plan, with no I/O, so every rule is unit-tested without a network. Quotes for symbols the account doesn't hold yet are passed in as `instruments`.
+- **Blank target vs 0% target.** A blank row means "not managed" and is never traded; an explicit `0` means "sell this position". The UI explains the difference, because confusing them would liquidate something by accident.
+- **Cash is the remainder, not something you type.** Symbol targets may add up to less than 100% and the rest stays in cash (AAPL 10% + TSLA 20% means 70% cash). They may never add up to more than 100%. At exactly 100% there is no cash target and cash is spent on buys, keeping only the cash buffer. This replaces the plan's "targets must sum to 100": forcing the user to type a cash row to reach 100 was busywork. The engine adds the remainder as an internal `CASH` target (so cash drift is shown and counts toward the band); an explicit `CASH` target is still accepted through the API and then everything must add up to 100.
+- **Units always round down.** Rounding up could overspend cash or sell more than is held. A 0% target sells the exact held quantity, ignoring rounding. Equity/ETF precision is whole shares, or 4 decimals if the brokerage allows fractional shares; crypto uses 6 decimals.
+- **When buys can't be fully funded, every buy is scaled by the same factor** (not first-come-first-served), so the allocation drifts toward target evenly.
+- **Targets are replaced wholesale in one transaction** (delete + insert + settings upsert), so a failed save can't leave half the targets.
+- **Account ownership = membership in the user's own `/accounts` list.** SnapTrade is the source of truth for what the token can access, so a guessed account id gets a 404 without us keeping our own ownership table.
+- **Every state-changing route checks `Origin`** in addition to the `sameSite=lax` cookie.
+
+## Phase 5: preview and execution
+
+- **Place with `POST /trade/place` (Trading_placeForceOrder), not the checked-order flow.** SnapTrade's own guide recommends validating in the app and force-placing. The impact check is used only to show estimates, and its trade object (which expires in 5 minutes) is never used to place.
+- **Impact is best-effort and never shown as $0 when unknown.** Per SnapTrade's confirmation guide, missing estimates display "Not available" and the confirmation text switches to the "impact unavailable" wording. The real API says `estimated_commissions` (plural), the published spec says singular, so both are accepted.
+- **Only equities and ETFs are executed. Crypto trades are listed as manual.** Crypto needs a separate pair-search/quote workflow (`BASE-QUOTE`, quote-currency choice) and the only crypto account here is read-only. A real limitation, not a silent gap.
+- **A read-only connection gets a manual trade list and no run is saved.** Nothing exists to confirm, so there is no execute button.
+- **Execution is an atomic state machine, driven by polling.** `previewed -> executing_sells -> executing_buys -> completed | partial | failed`. Each move is `UPDATE ... WHERE status = <from> RETURNING`, so a double click, second tab or two concurrent pollers can only win once. This is covered by integration tests with SnapTrade mocked.
+- **Buys are recomputed from the account's actual cash after sells fill, and capped at the units the user confirmed.** Handles partial fills and price moves without ever buying more than was shown on the confirmation screen.
+- **Each phase records a `submitted` flag after all its orders are inserted.** Pollers wait for it, otherwise a poll landing mid-submission would see an empty or half-built order list as "all terminal" and finish the run early. If the flag never appears (server died mid-submit) the run is closed after 90s with an explanation.
+- **Order row id is sent as `client_order_id`.** If a submit's result is never seen we mark the order "couldn't confirm" instead of resubmitting, because a blind retry could double-trade.
+- **A run with orders still open after 60s becomes `partial`, never `failed`, and keeps updating.** Market orders placed while the market is closed sit open until the open. We never cancel at the brokerage, and late fills flip the run to `completed` on a later poll.
+- **Polling is every 6s (15s once settled), and the server throttles brokerage refreshes to one per 5s.** SnapTrade limits Personal users to about 10 requests a minute per account, so the plan's 2-second polling would be rate limited within seconds. A 429 leaves the old statuses in place and is shown to the user as a wait-a-minute message.
+- **Preview warns about open orders.** They aren't in positions or cash, so a plan made while an order is pending can over-trade. (Found with real data: the paper account had a pending 20-share SPY order.)
+- **Preview expires after 5 minutes and any older unexecuted preview is cancelled** when a new one is made.
+
+## Symbol search
+
+- **Adding a target symbol is a search, not free text.** It uses SnapTrade's per-account symbol search (`POST /accounts/{id}/symbols`), so only symbols the brokerage supports can be added, and a typo can't become a target. Results are USD-only (v1), deduplicated by ticker, and ranked client-independent: exact ticker, ticker prefix, name prefix, then a word in the name (SnapTrade's own order puts VOO third for "vo").
+- **Debounced (350ms), cached per query in the page, one request per distinct search.** SnapTrade limits Personal users to about 10 requests a minute per account, so search-as-you-type would otherwise exhaust it.
+- **Symbols the app can't trade are still selectable but tagged "manual only".** Stocks, ADRs, preferreds and ETFs are placed by the app; other types (trust units, crypto) appear in the manual trade list.
+- **No separate ownership lookup on the search route.** SnapTrade scopes the call to the user's token, and a foreign account id returns 404 (mapped to our own 404), which saves two requests against the rate limit.
+
+## Theme and UI architecture
+
+- **One button flips light/dark.** Both icons are always rendered and CSS shows the right one, so the toggle holds no state, can't hydrate wrong, and needs no listeners. With no saved choice the OS preference is used; after a click the explicit choice is stored in `localStorage` (failures fall back silently).
+- **A tiny inline script in `<head>` applies the `dark` class before first paint**, so a light-theme user on a dark OS never sees a dark flash.
+- **Semantic design tokens, not colour pairs.** `app/globals.css` defines `--surface`, `--ink`, `--muted`, `--line`, `--brand`, `--positive`, `--negative`, `--caution` (each with a soft variant) for light and dark and maps them into Tailwind (`bg-surface`, `text-muted`, `border-line`, ...). Components never write `dark:` colour pairs, so a rebrand or a third theme touches one file.
+- **One component per file, grouped by feature** (`components/{ui,layout,auth,dashboard,targets,rebalance,run,landing,settings,privacy}`). Pages in `app/` are thin: metadata, `PageHeader`, and one `<Suspense>`-wrapped loader component.
+- **Client logic lives in hooks, rendering in components.** `useTargetsEditor`, `useSymbolSearch`, `useRebalancePreview`, `useRunPolling` and `useCountdown` own state and network calls; the components they feed are presentational. The arithmetic worth testing (`lib/target-rows.ts`, `lib/rebalance/fees.ts`) is pure and unit-tested instead of buried in components.
+- **Server modules split by responsibility.** The trade engine is `trade-rules` (rounding and what is executable) / `sells` / `buys` / `after-weights` / `plan-warnings`, orchestrated by `generatePlan`. Execution is `runs` (all DB access), `submit-orders`, `refresh-orders`, `order-errors`, `errors` (domain errors) and `execute` (just the state machine). The behaviour-preserving split was checked against the existing 90 tests before any new ones were added.
+- **Dead code is removed by measurement, not by eye.** A one-off `knip` scan (via `npx`, not a dependency) found the unused exports and template images that were deleted. Its remaining reports are known false alarms: `@tailwindcss/turbopack` is referenced by name in `next.config.ts`, and `server-only` is resolved internally by Next.
+- **Security headers** (`nosniff`, `X-Frame-Options: DENY`, strict referrer policy, restrictive permissions policy, HSTS in production) are set in `next.config.ts`. No CSP yet: the inline theme script would need a nonce, which is listed under "what I'd build next".
+
+## Sign-in robustness
+
+- **Several pending sign-ins are tracked at once, not one.** The cookie holds up to 5 attempts (15 minutes each), every one with its own random `state`, nonce and PKCE verifier, and each is consumed when *its* callback arrives (`lib/oauth/pending-logins.ts`). With a single slot, a second click, a second tab or a stale SnapTrade tab silently overwrote the attempt the user was actually finishing, and the callback then failed with "state mismatch". Security is unchanged: states are still unguessable, single-use and short-lived, and an unknown state is rejected without consuming anything.
+- **A repeated callback while already signed in redirects to the dashboard instead of erroring.** No token exchange happens on that path, so it can't be abused; it just removes a confusing error after a successful sign-in.
+- **Failures say *why*.** `session_lost` (the cookie never arrived: wrong address, blocked cookies, expiry) and `state_mismatch` (another attempt replaced this one) have separate, actionable messages, and the server logs only the reason code (never a state, code or token).
+- **Sign-in only starts on the registered host.** Cookies are per host. Starting on `http://localhost:3000` stored the login state under `localhost`, while SnapTrade returns to the registered `http://127.0.0.1:3000`, so the callback could never find it, every time. `/api/auth/login` now redirects to `APP_BASE_URL`'s host before setting any cookie. This is a route-handler guard rather than a `proxy.ts`, because Next rewrites a proxy's redirect to a relative path when it targets the server's own configured address, which keeps the browser on the wrong host and loops (found by testing).
+- **`npm run dev` binds `127.0.0.1:3000`, and `allowedDevOrigins` allows `127.0.0.1`.** Next's dev server only trusts `localhost` and the host it was started with; started as plain `next dev` and browsed at `127.0.0.1`, it blocks its live-reload connection and the page never becomes interactive (the search box, preview button and theme toggle do nothing). The config fix means it works however the server is started.
+
+## Dashboard guidance
+
+- **The dashboard tells the user what to do next.** `nextAction()` (pure, tested) picks one action from each account's status: set missing targets first (nothing else can happen without them), then fix invalid ones, then rebalance drifted accounts; otherwise "you're on target". `GuidedSteps` shows the three-step path (review, set targets, rebalance) with the current step highlighted and one button. Each account card shows its status badge (No targets yet / Drifted / On target / Fix targets) and promotes the matching button.
+- **`accountStatus()` reuses the engine's drift and band logic**, so the dashboard's "Drifted" always agrees with what the Rebalance page will compute. Prices for symbols not yet held aren't needed (it only uses percentages).
+- **Allocation and Holdings are one panel.** They showed the same positions twice. "Your allocation" lists only positions (no cash; cash has its own tile) with units, price, value and a weight bar, summed by symbol across accounts. Weights are shares of total portfolio value, the same basis as the "Now" column on the targets screen, so the two screens never disagree.
+- **True exposure lists the top companies, with their source.** The top 8 companies inside held ETFs by true weight, each with "via SPY, VOO", rather than only the gaps versus direct holdings (which is empty for a portfolio that holds only ETFs).
+- **Never show zeros or advice built from missing data.** If no account could be read (typically SnapTrade's per-account rate limit), the dashboard shows only the explanation. If some failed, the guidance panel is hidden, because an unread account may be the one that needs attention.
+
+## Automatic execution
+
+- **A confirmed rebalance finishes on its own: buys follow the sells with nobody on the page.** Previously the buys were only placed when the status page happened to be open and polling, and after 60 seconds without a fill the run gave up and permanently dropped them. Market orders placed while the market is closed wait for the next open (often 16+ hours), so a healthy run was being abandoned. Found on a real run: it had been confirmed with 2 sells and a $13,241 buy, and was marked "partly done" 81 seconds later with the buy never to be placed.
+- **No more short timeouts: a run waits up to 24 hours.** Open orders just keep the run in `executing_*`. After a full day without fills (a Day order should have expired) the run closes as `partial` with an explanation, and a fill that arrives after that still flips it to `completed`.
+- **Three things advance a run, and all are safe together because every transition is an atomic compare-and-set.** (1) The status page's polling, as before. (2) A driver started with Next's `after()` right after the sells are placed, which keeps polling after the HTTP response for up to ~4.5 minutes (the function's time limit) so the common case, the market open and fills within seconds, completes even if the user closes the tab. (3) For long waits, a worker on long-lived servers (local dev, `next start`, a container: a once-a-minute loop started in `instrumentation.ts`, skipped on Vercel) and a protected cron endpoint `/api/cron/advance-runs` for serverless.
+- **Vercel Hobby limits the cron to once a day**, so `vercel.json` schedules it for 14:35 UTC on weekdays, just after the US open. On a free serverless deployment the overnight case therefore resolves at the next open's cron run or when the user opens the page, not instantly. An external pinger every few minutes (or a paid plan) tightens that. The endpoint is disabled unless `CRON_SECRET` is set, and compares the bearer token in constant time.
+- **One `recentOrders` call serves every run on an account.** It returns every order for the account, and SnapTrade limits Personal users to ~10 requests a minute per account, shared with the user's own page loads. Runs, pollers, the driver and the worker share one cached result for 8 seconds (in-flight requests too), and the worker runs once a minute. Found the hard way: with more frequent polling, a preview request hit the 429.
+- **The whole plan is visible from the start.** The confirmation screen has a "How this will run" section (sells now, buys automatically after they fill, never more than shown), and the run page lists the confirmed-but-not-yet-placed buys as "Queued" instead of showing only the sells.
+- **Buys are still recomputed from actual cash and capped at the confirmed units.** Automation changed *when* they go out, not *what*: the fresh plan can only reduce a confirmed buy, never exceed it.
+
+## One rebalance at a time, and order history
+
+- **At most one active rebalance per account, enforced by the database.** A partial unique index (`one_active_run_per_account` on `account_id WHERE status IN ('executing_sells','executing_buys')`) makes a second rebalance impossible while one is running, even if two confirmations race. Orders that are still open aren't in cash or positions yet, so a second plan would sell and buy on top of the first. Found with real data: a fresh preview was an almost exact duplicate of the run already in flight, with only a yellow "2 open orders" warning between the user and a double trade. The preview refuses early with a link to the running one, the rebalance page and dashboard say so, and the guide shows "View progress" instead of inviting another rebalance.
+- **History is read from our own tables, so it always renders.** `/history` lists every run that was actually placed (not unconfirmed previews, not cancelled), newest first, with each order's status and the confirmed buys still queued. If SnapTrade can't be reached (rate limit, connection needs re-authorizing) only the account *names* degrade to a short id, with a sign-in notice; the history itself is never hidden.
+- **Statuses settle on their own, including for old runs.** `recentOrders` only covers 24 hours, so runs older than ~20h are refreshed from the 7-day order list (`/accounts/{id}/orders?days=7`). The worker also revisits `partial` runs that still have open orders, so a stale "Submitted" turns into the true final status and a run whose queued orders all fill moves to `completed` without anyone opening it. While any run on the page is still running, the page nudges it forward every 15s and re-renders.
+- **A closed-out run's notes can't contradict its orders.** If the sells of a run that was closed out fill later, its note is rewritten ("the sells filled after this run had been closed out, so its buys were never placed") rather than still saying they hadn't filled. Such a run stays `partial`: its buys were never placed, so calling it complete would be false.
+
+## Targets on total exposure
+
+- **A per-account setting decides what a target means: direct holdings (default) or total exposure.** Reported with real data: Apple target 20%, held exactly 20% directly, yet the dashboard showed 24.4% because SPY and VOO hold about 4.4% Apple. The user expected "20%" to mean 20% Apple overall, so only ~15.6% should be held directly. In "total exposure" mode a stock's direct target is `target - sum(target(E) * weight of the stock in E)` over the targeted ETFs E (the formula from the original plan's v2), ETFs keep their own targets, and the result goes through the unchanged engine. With Apple 20% total and SPY/VOO 30% each, Apple's direct target becomes ~15.5%, so if Apple is held at 20% directly the preview *sells* about $4.5k of it.
+- **Default stays "direct".** Silently changing what an existing percentage means would change the trades on accounts that already have targets. The switch is a clearly worded two-option control at the top of the Targets page.
+- **One shared resolver (`resolveTargets`, pure, tested) is used everywhere**: the editor (so the cash remainder and "over 100%" check match what will happen), the dashboard status, the rebalance page, the preview and the automatic buys. A mismatch between screens would be worse than either behaviour, so there is exactly one implementation.
+- **The screen shows its working.** In this mode "Now" shows each stock's *total* exposure (the 24.4% next to the 20% target), the table says "Target % (total)", and plain-language notes explain every adjustment ("AAPL: 20% total = 15.5% held directly + 4.5% via SPY, VOO"). Both the rebalance page and the preview repeat it before anything is confirmed.
+- **If the ETFs alone exceed a stock's target, its direct target is clamped to 0 with a warning**, never negative: we don't sell short or "sell the ETF's share".
+- **Only targeted ETFs are counted.** An ETF you hold but haven't given a target is outside the rebalance (the same rule as for any untargeted holding), so its contents don't reduce a stock's direct target.
+- **Server-side validation in this mode checks bounds only; the sum is checked where ETF weights are known.** Typed totals legitimately exceed what is held directly (120% typed can be 100% direct once ETFs are counted), so the editor validates the *resulting* direct allocation, and the plan rejects an impossible one as "Fix targets".
+- **Accuracy depends on the ETF weights.** They're the top holdings from Alpha Vantage (cached 24h) or the static fallback, so the share an ETF is assumed to hold of a stock is approximate, and an ETF with no weights counts as nothing. This is labelled on the dashboard, and it is why this is an opt-in mode.

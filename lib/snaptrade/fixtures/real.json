@@ -1,0 +1,428 @@
+{
+ "accounts": [
+  {
+   "brokerage_authorization": "conn-1",
+   "name": "Binance SPOT",
+   "institution_name": "Binance",
+   "balance": {
+    "total": {
+     "amount": 750.32314767,
+     "currency": "USD"
+    }
+   },
+   "raw_type": "SPOT",
+   "status": null,
+   "is_paper": false,
+   "account_category": "INVESTMENT",
+   "id": "acct-1"
+  },
+  {
+   "brokerage_authorization": "conn-2",
+   "name": "Alpaca Paper",
+   "institution_name": "Alpaca Paper",
+   "balance": {
+    "total": {
+     "amount": 100000,
+     "currency": "USD"
+    }
+   },
+   "raw_type": null,
+   "status": "open",
+   "is_paper": true,
+   "account_category": "INVESTMENT",
+   "id": "acct-2"
+  }
+ ],
+ "connections": [
+  {
+   "id": "conn-1",
+   "type": "read",
+   "disabled": false,
+   "brokerage": {
+    "allows_trading": true,
+    "allows_fractional_units": true,
+    "maintenance_mode": false
+   }
+  },
+  {
+   "id": "conn-2",
+   "type": "trade",
+   "disabled": false,
+   "brokerage": {
+    "allows_trading": true,
+    "allows_fractional_units": true,
+    "maintenance_mode": false
+   }
+  }
+ ],
+ "binanceBalances": [
+  {
+   "currency": {
+    "code": "USD"
+   },
+   "cash": 0
+  }
+ ],
+ "binancePositions": {
+  "results": [
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "SEI",
+     "raw_symbol": "SEI",
+     "currency": "USD"
+    },
+    "units": "200.9758",
+    "price": "0.06254734",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "JUP",
+     "raw_symbol": "JUP",
+     "currency": "USD"
+    },
+    "units": "214.4328",
+    "price": "0.2923741",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "DOT",
+     "raw_symbol": "DOT",
+     "currency": "USD"
+    },
+    "units": "0.00888",
+    "price": "1.1132272",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "ATOM",
+     "raw_symbol": "ATOM",
+     "currency": "USD"
+    },
+    "units": "0.009",
+    "price": "1.70176046",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "MBL",
+     "raw_symbol": "MBL",
+     "currency": "USD"
+    },
+    "units": "0.88",
+    "price": "0.00070592",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "ROSE",
+     "raw_symbol": "ROSE",
+     "currency": "USD"
+    },
+    "units": "0.0706",
+    "price": "0.00756626",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "SHIB",
+     "raw_symbol": "SHIB",
+     "currency": "USD"
+    },
+    "units": "66.46",
+    "price": "0.00000499",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "SUI",
+     "raw_symbol": "SUI",
+     "currency": "USD"
+    },
+    "units": "11.39311663",
+    "price": "0.97485317",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "DOGE",
+     "raw_symbol": "DOGE",
+     "currency": "USD"
+    },
+    "units": "1052.7879303",
+    "price": "0.07927308",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "USDT",
+     "raw_symbol": "USDT",
+     "currency": "USD"
+    },
+    "units": "42.38208",
+    "price": "0.998721156570812951258631073869764804840087890625",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "USDC",
+     "raw_symbol": "USDC",
+     "currency": "USD"
+    },
+    "units": "0.00700879",
+    "price": "1.00112607",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "INJ",
+     "raw_symbol": "INJ",
+     "currency": "USD"
+    },
+    "units": "0.00335989",
+    "price": "8.60743288",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "GALA",
+     "raw_symbol": "GALA",
+     "currency": "USD"
+    },
+    "units": "0.672",
+    "price": "0.00195804",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "GMT",
+     "raw_symbol": "GMT",
+     "currency": "USD"
+    },
+    "units": "0.0557",
+    "price": "0.00752158",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "RED",
+     "raw_symbol": "RED",
+     "currency": "USD"
+    },
+    "units": "17.982",
+    "price": "0.13838562",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "ADA",
+     "raw_symbol": "ADA",
+     "currency": "USD"
+    },
+    "units": "0.0804",
+    "price": "0.21928931",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "ENA",
+     "raw_symbol": "ENA",
+     "currency": "USD"
+    },
+    "units": "0.00509",
+    "price": "0.18810507",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "MEME",
+     "raw_symbol": "MEME",
+     "currency": "USD"
+    },
+    "units": "0.821",
+    "price": "0.0004927",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "ASTER",
+     "raw_symbol": "ASTER",
+     "currency": "USD"
+    },
+    "units": "0.00025",
+    "price": "0.70297792",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "LDO",
+     "raw_symbol": "LDO",
+     "currency": "USD"
+    },
+    "units": "0.00474",
+    "price": "0.3896712",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "ALICE",
+     "raw_symbol": "ALICE",
+     "currency": "USD"
+    },
+    "units": "0.00548",
+    "price": "0.14667051",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "APE",
+     "raw_symbol": "APE",
+     "currency": "USD"
+    },
+    "units": "0.0035",
+    "price": "0.1511635",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "CTK",
+     "raw_symbol": "CTK",
+     "currency": "USD"
+    },
+    "units": "0.09",
+    "price": "0.11547122",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "APT",
+     "raw_symbol": "APT",
+     "currency": "USD"
+    },
+    "units": "0.00841567",
+    "price": "0.79566658",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "POL",
+     "raw_symbol": "POL",
+     "currency": "USD"
+    },
+    "units": "0.0878",
+    "price": "0.09281808",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "BTTC",
+     "raw_symbol": "BTTC",
+     "currency": "USD"
+    },
+    "units": "120.6",
+    "price": "0.00000036",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "KAVA",
+     "raw_symbol": "KAVA",
+     "currency": "USD"
+    },
+    "units": "0.087",
+    "price": "0.06988757",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "YGG",
+     "raw_symbol": "YGG",
+     "currency": "USD"
+    },
+    "units": "0.0044",
+    "price": "0.02467098",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "FET",
+     "raw_symbol": "FET",
+     "currency": "USD"
+    },
+    "units": "121.732475",
+    "price": "0.19100547",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "DASH",
+     "raw_symbol": "DASH",
+     "currency": "USD"
+    },
+    "units": "0.000788",
+    "price": "48.47472866",
+    "currency": "USD"
+   },
+   {
+    "instrument": {
+     "kind": "crypto",
+     "symbol": "DYDX",
+     "raw_symbol": "DYDX",
+     "currency": "USD"
+    },
+    "units": "0.0082",
+    "price": "0.11866358",
+    "currency": "USD"
+   }
+  ],
+  "data_freshness": {
+   "as_of": "2026-10-18T00:03:42Z"
+  }
+ },
+ "alpacaBalances": [
+  {
+   "currency": {
+    "code": "USD"
+   },
+   "cash": 100000
+  }
+ ],
+ "alpacaPositions": {
+  "results": [],
+  "data_freshness": {
+   "as_of": "2026-10-18T00:03:44Z"
+  }
+ }
+}

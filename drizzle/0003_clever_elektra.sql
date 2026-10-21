@@ -1,0 +1,1 @@
+ALTER TABLE "account_settings" ADD COLUMN "target_mode" text DEFAULT 'direct' NOT NULL;
