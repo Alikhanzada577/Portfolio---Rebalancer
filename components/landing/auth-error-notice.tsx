@@ -6,6 +6,7 @@ const MESSAGES: Record<string, string> = {
     "We couldn't find your sign-in attempt, so we stopped for safety. This usually means the app was opened at a different address than the one registered with SnapTrade, or cookies are blocked. Open the app at the address in the setup instructions, then sign in once.",
   state_mismatch: "That sign-in was replaced by a newer one (a second click or another tab). Please sign in again and finish it in a single tab.",
   code_expired: "Sign-in took too long and the authorization code expired. Please try again.",
+  storage_failed: "Signed in with SnapTrade, but we couldn't save your session. The database may be unreachable or not set up yet.",
 };
 const GENERIC = "We couldn't complete sign-in with SnapTrade. Please try again.";
 

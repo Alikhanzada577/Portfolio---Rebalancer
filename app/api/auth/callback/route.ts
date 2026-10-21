@@ -77,8 +77,14 @@ export async function GET(req: NextRequest) {
 
   // Keyed on `sub`. email_verified is stored so any future email-based linking can require it.
   const profile = { email: claims.email ?? null, emailVerified: claims.email_verified ?? false };
-  await db.insert(users).values({ id: claims.sub, ...profile }).onConflictDoUpdate({ target: users.id, set: profile });
-  await saveTokens(claims.sub, tokens);
+  try {
+    await db.insert(users).values({ id: claims.sub, ...profile }).onConflictDoUpdate({ target: users.id, set: profile });
+    await saveTokens(claims.sub, tokens);
+  } catch (err) {
+    // Typically a database that is unreachable or not migrated. Log the error class and message only (never values).
+    console.error(`auth callback storage failed: ${err instanceof Error ? `${err.name}: ${err.message}` : "unknown"}`);
+    return fail("storage_failed");
+  }
 
   session.userId = claims.sub;
   await session.save();
