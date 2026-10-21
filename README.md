@@ -43,7 +43,7 @@ Validated with zod at server start; a missing or malformed value stops the serve
 | `CRON_SECRET` | _Optional._ 16+ characters. Authorizes `/api/cron/advance-runs`, which finishes waiting rebalances (placing buys after sells fill) on serverless hosts. Vercel Cron sends it automatically. The endpoint is disabled without it. |
 | `ALPHAVANTAGE_API_KEY` | _Optional._ Live ETF holdings weights for look-through exposure. Without it, a static approximate table is used. |
 
-Deploying to Vercel: set the same variables (with `APP_BASE_URL` = the Vercel URL), run `npm run db:migrate` once against the production database, and register `https://<app>.vercel.app/api/auth/callback` as a redirect URI in the SnapTrade Dashboard.
+Deploying to Vercel: import the repo, set the variables above (`APP_BASE_URL` is optional there: it defaults to the project's production domain, `https://<project>.vercel.app`), run `npm run db:migrate` once against the production database, and register `https://<project>.vercel.app/api/auth/callback` as a redirect URI in the SnapTrade Dashboard.
 
 ## How it works
 

@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { withDefaultBaseUrl } from "@/lib/env-defaults";
 
 const schema = z.object({
   SNAPTRADE_OAUTH_CLIENT_ID: z.string().min(1),
@@ -26,7 +27,7 @@ const schema = z.object({
     .transform((v) => v || undefined),
 });
 
-const parsed = schema.safeParse(process.env);
+const parsed = schema.safeParse(withDefaultBaseUrl(process.env));
 if (!parsed.success) {
   // Only key names and rule messages, never values.
   const problems = parsed.error.issues.map((i) => `  ${i.path.join(".")}: ${i.message}`).join("\n");
